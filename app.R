@@ -42,7 +42,11 @@ ui <- fluidPage(
     )
   ),
   br(),
-  uiOutput("download_file")
+  fluidRow(
+    column(width = 4,
+      uiOutput("download_file")
+    )
+  )
 )
 
 server <- function(input, output) {
@@ -54,8 +58,8 @@ server <- function(input, output) {
     if (data$file_upload_visible) {
       return(
         div(
-          radioButtons("separator", "Which separator does the file use?", selected = ",", choices = c(comma = ",", semicolon = ";", tab = "\t")),
-          checkboxInput("header", "Does the input file have column headers?", TRUE),
+          radioButtons("separator", "Which separator does the file use?", selected = ",", choices = c(comma = ",", colon = ":", semicolon = ";", tab = "\t")),
+          checkboxInput("header", "Does the input file have column names?", TRUE),
           fileInput("file1", "Choose a CSV file",
                     multiple = FALSE,
                     accept = c("text/csv",
@@ -98,8 +102,7 @@ server <- function(input, output) {
   output$table <- DT::renderDataTable(
     {
       req(!identical(data$uploaded , data.frame()))
-      reduced_view <- data.frame(data$uploaded[1:min(nrow(data$uploaded), 10),])
-      return(DT::datatable(reduced_view,
+      return(DT::datatable(data$uploaded %>% filter(row_number() <= 10),
                          selection = list(target = 'none'),
                          rownames = NULL,
                          style = 'bootstrap',
@@ -116,17 +119,17 @@ server <- function(input, output) {
   
   output$cipher <- renderUI({
     req(!identical(data$uploaded, data.frame()))
-    actionButton("cipher", "Cipher the selected columns")
+    actionButton("cipher", "Cipher columns", width = '100%')
   })
   
   output$remove <- renderUI({
     req(!identical(data$uploaded, data.frame()))
-    actionButton("remove", "Remove the selected columns")
+    actionButton("remove", "Remove columns", width = '100%')
   })
   
   output$download_file <- renderUI({
     req(!identical(data$uploaded, data.frame()))
-    downloadButton("download_data", label = "Download encrypted file")
+    downloadButton("download_data", label = "Download encrypted file", width = '100%')
   })
   
   output$download_data <- downloadHandler(
@@ -153,7 +156,7 @@ server <- function(input, output) {
 
   observeEvent(input$remove, {
     req(input$column_selection)
-    data$uploaded <- data$uploaded[,!names(data$uploaded) %in% input$column_selection]
+    data$uploaded[,names(data$uploaded) %in% input$column_selection] <- NULL
   })
   
   observeEvent(once = T, ignoreNULL = F, eventExpr = data$uploaded, {
