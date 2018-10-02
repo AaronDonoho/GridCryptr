@@ -7,6 +7,7 @@ library(yaml)
 library(devtools)
 # remotes::install_github("ropensci/cyphr", upgrade = FALSE)
 library(cyphr)
+library(shinythemes)
 
 # generate public key from private key
 # k <- key_sodium(sodium::pubkey(charToRaw( [insert 32 char string] )))
@@ -16,6 +17,8 @@ library(cyphr)
 # to decrypt:
 # cyphr::decrypt(read.csv("download_data"), key_sodium(sodium::pubkey(charToRaw( [the 32 char string from before] ))))
 
+
+options(shiny.maxRequestSize=10000*1024^2)
 bytes <- c("ab", "d9", "fd", "9f", "44", "cc", "84", "12", "59", "b1", "34", "d9", "6c", "8d", "51", "f9", "2d", "37", "d1", "ab", "9a", "3a", "91", "bd", "93", "c9", "f3", "73", "95", "d6", "13", "12")
 
 yaml <- read_yaml("./config")
@@ -23,35 +26,72 @@ public_key <- cyphr::key_sodium(as.raw(as.hexmode(bytes)))
 salt <<- yaml$salt
 
 ui <- fluidPage(
-  fileInput("file1", "Choose a CSV file",
-            multiple = FALSE,
-            accept = c("text/csv",
-                       "text/comma-separated-values,text/plain",
-                       ".csv")),
-  checkboxInput("header", "Does the file have column headers?", TRUE),
+  theme = shinytheme("spacelab"),
+  tags$head(tags$style("font-size: 150%")),
+  uiOutput("file_upload"),
   dataTableOutput("table"),
   br(),
+  br(),
   uiOutput("column_selection"),
-  uiOutput("cipher"),
-  uiOutput("remove"),
+  br(),
+  fluidRow(
+    column(width = 3,
+      uiOutput("cipher")
+    ),
+    column(width = 3,
+      uiOutput("remove")
+    )
+  ),
   br(),
   uiOutput("download_file")
 )
 
 server <- function(input, output) {
 
-  data <- reactiveValues(uploaded = data.frame())
+  data <- reactiveValues(uploaded = data.frame(), file_upload_visible = T)
+  separator <<- ","
+  
+  output$file_upload <- renderUI({
+    if (data$file_upload_visible) {
+      return(
+        div(
+          radioButtons("separator", "Which separator does the file use?", selected = ",", choices = c(comma = ",", semicolon = ";", tab = "\t")),
+          checkboxInput("header", "Does the input file have column headers?", TRUE),
+          fileInput("file1", "Choose a CSV file",
+                    multiple = FALSE,
+                    accept = c("text/csv",
+                               "text/comma-separated-values,text/plain",
+                               ".csv"))
+        )
+      )
+    } else {
+      return(
+        div(
+          actionButton("start_over", "Back to file selection")
+        )
+      )
+    }
+  })
+  
+  observeEvent(input$start_over, {
+    data$uploaded = data.frame()
+    data$file_upload_visible <- T
+  })
   
   observeEvent(input$file1, {
     tryCatch(
       {
+        separator <<- input$separator
         data$uploaded <- read.csv(input$file1$datapath,
                         header = input$header,
+                        sep = separator,
                         stringsAsFactors = F)
+        data$file_upload_visible <- F
       },
       error = function(e) {
         data$uploaded <- data.frame()
-        stop(safeError(e))
+        data$file_upload_visible <- T
+        showNotification("Could not read file", duration = 4)
       }
     )
   })
@@ -59,16 +99,20 @@ server <- function(input, output) {
   output$table <- DT::renderDataTable(
     {
       req(!identical(data$uploaded , data.frame()))
-      return(DT::datatable(data.frame(data$uploaded),
-                           selection = list(target = 'column'),
-                           rownames = NULL,
-                           options = list(dom = 't', bSort = F)))
+      reduced_view <- data.frame(data$uploaded[1:min(nrow(data$uploaded), 10),])
+      return(DT::datatable(reduced_view,
+                         selection = list(target = 'none'),
+                         rownames = NULL,
+                         style = 'bootstrap',
+                         width = '100%',
+                         height = 100,
+                         options = list(dom = 't', bSort = F, scrollX = T)))
     }
   )
   
   output$column_selection <- renderUI({
     req(!identical(data$uploaded, data.frame()))
-    checkboxGroupInput("column_selection", "Please select the columns to be changed", choices = colnames(data$uploaded))
+    checkboxGroupInput("column_selection", "Please select the columns to be changed", choices = colnames(data$uploaded), inline = T)
   })
   
   output$cipher <- renderUI({
@@ -83,7 +127,7 @@ server <- function(input, output) {
   
   output$download_file <- renderUI({
     req(!identical(data$uploaded, data.frame()))
-    downloadButton("download_data", label = "Download results")
+    downloadButton("download_data", label = "Download encrypted file")
   })
   
   output$download_data <- downloadHandler(
@@ -91,16 +135,21 @@ server <- function(input, output) {
       paste('ciphered-', Sys.time(), '.csv', sep='')
     },
     content = function(con) {
-      cyphr::encrypt(write.csv(data$uploaded, con, row.names = F), public_key)
-      # write.csv(data$uploaded, con, row.names = F)
+      cyphr::encrypt(write.table(data$uploaded, con, row.names = F, sep = separator), public_key)
     }
   )
   
   observeEvent(input$cipher, {
     req(input$column_selection, salt)
-    for (column_name in input$column_selection) {
-      data$uploaded[,column_name] <- sapply(paste0(data$uploaded[,column_name], salt), digest, "sha256")
-    }
+    withProgress(message = 'Hashing', value = 0, {
+      x <- 1
+      n <- length(input$column_selection)
+      for (column_name in input$column_selection) {
+        data$uploaded[,column_name] <- sapply(paste0(data$uploaded[,column_name], salt), digest, "sha256")
+        incProgress(x / n, detail = paste("column", column_name))
+        x <- x + 1
+      }
+    })
   })
 
   observeEvent(input$remove, {
