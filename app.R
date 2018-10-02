@@ -27,7 +27,6 @@ salt <<- yaml$salt
 
 ui <- fluidPage(
   theme = shinytheme("spacelab"),
-  tags$head(tags$style("font-size: 150%")),
   uiOutput("file_upload"),
   dataTableOutput("table"),
   br(),
