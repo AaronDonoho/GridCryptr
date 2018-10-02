@@ -1,10 +1,10 @@
-./R-Portable-Mac
-./R-Portable-Win
+/R-Portable-Mac
+/R-Portable-Win
 node_modules
 .Rhistory
 index.html
 package.json
 package-lock.json
-./GridCryptr
+/GridCryptr
 *.js
 gridcryptr.Rproj
